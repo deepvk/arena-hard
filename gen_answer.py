@@ -13,6 +13,7 @@ import tiktoken
 import shortuuid
 import tqdm
 
+import utils
 from utils import (
     load_questions,
     load_model_answers,
@@ -27,6 +28,7 @@ from utils import (
     chat_completion_yandex,
     chat_completion_sber,
     detect_language,
+    detect_repetitions,
     OPENAI_MODEL_LIST,
     temperature_config,
 )
@@ -53,54 +55,42 @@ def get_answer(
         turns = []
         for j in range(len(question["turns"])):
             conv.append({"role": "user", "content": question["turns"][j]["content"]})
-            if api_type == "anthropic":
-                output = chat_completion_anthropic(model=endpoint_info["model_name"],
-                                                   messages=conv,
-                                                   temperature=temperature,
-                                                   max_tokens=max_tokens)
-            elif api_type == "mistral":
-                output = chat_completion_mistral(model=endpoint_info["model_name"],
-                                                 messages=conv,
-                                                 temperature=temperature,
-                                                 max_tokens=max_tokens)
-            elif api_type == "gemini":
-                output = chat_completion_gemini(model=endpoint_info["model_name"],
-                                                messages=question["turns"][j]["content"],
-                                                temperature=temperature,
-                                                max_tokens=max_tokens)
-            elif api_type == "azure":
-                output = chat_completion_openai_azure(model=endpoint_info["model_name"],
-                                                      messages=conv,
-                                                      temperature=temperature,
-                                                      max_tokens=max_tokens,
-                                                      api_dict=api_dict)
-            elif api_type == "cohere":
-                output = chat_completion_cohere(model=endpoint_info["model_name"],
-                                                messages=conv,
-                                                temperature=temperature,
-                                                max_tokens=max_tokens)
-            elif api_type == "yandex":
+            if api_type == "yandex":
                 for reply in conv:  # Rename key name for compatibility with yandex api
                     reply["text"] = reply.pop("content")
 
-                output = chat_completion_yandex(model=endpoint_info["model_name"],
-                                                messages=conv,
-                                                temperature=temperature,
-                                                max_tokens=max_tokens)
+                output, prompt_tokens, completion_tokens = chat_completion_yandex(
+                    model=endpoint_info["model_name"],
+                    messages=conv,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
             elif api_type == "sber":
-                output = chat_completion_sber(model=endpoint_info["model_name"],
-                                                messages=conv,
-                                                temperature=temperature,
-                                                max_tokens=max_tokens)
+                output, prompt_tokens, completion_tokens = chat_completion_sber(
+                    model=endpoint_info["model_name"],
+                    messages=conv,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
             else:
-                output = chat_completion_openai(model=endpoint_info["model_name"], 
-                                                messages=conv, 
-                                                temperature=temperature, 
-                                                max_tokens=max_tokens, 
-                                                api_dict=api_dict)
+                output, prompt_tokens, completion_tokens = chat_completion_openai(
+                    model=endpoint_info["model_name"],
+                    messages=conv,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    api_dict=api_dict
+                )
             conv.append({"role": "assistant", "content": output})
 
-            turns.append({"content": output, "token_len": len(encoding.encode(output))})
+            turns.append(
+                {
+                    "content": output,
+                    "token_len": prompt_tokens + completion_tokens,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens
+                }
+            )
+
         choices.append({"index": i, "turns": turns})
 
     # Dump answers
@@ -171,7 +161,9 @@ if __name__ == "__main__":
             futures = []
             count = 0
             for index, question in enumerate(questions):
-                if model in existing_answer and question["question_id"] in existing_answer[model]:
+                if model in existing_answer and question["question_id"] in existing_answer[model] \
+                        and utils.API_ERROR_OUTPUT not in \
+                        existing_answer[model][question["question_id"]]['choices'][0]['turns'][0]['content']:
                     count += 1
                     continue
                 future = executor.submit(
@@ -194,3 +186,4 @@ if __name__ == "__main__":
                 future.result()
 
         detect_language(answer_file)
+        detect_repetitions(answer_file)

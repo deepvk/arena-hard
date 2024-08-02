@@ -107,7 +107,7 @@ def make_config(config_file: str) -> dict:
     return config_kwargs
 
 
-def chat_completion_openai(model, messages, temperature, max_tokens, api_dict=None):
+def chat_completion_openai(model, messages, temperature, max_tokens, api_dict=None) -> (str, int, int):
     import openai
     if api_dict:
         client = openai.OpenAI(
@@ -118,6 +118,8 @@ def chat_completion_openai(model, messages, temperature, max_tokens, api_dict=No
         client = openai.OpenAI()
     
     output = API_ERROR_OUTPUT
+    prompt_tokens = 0
+    completion_tokens = 0
     for _ in range(API_MAX_RETRY):
         try:
             # print(messages)
@@ -128,6 +130,8 @@ def chat_completion_openai(model, messages, temperature, max_tokens, api_dict=No
                 max_tokens=max_tokens
                 )
             output = completion.choices[0].message.content
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
             break
         except openai.RateLimitError as e:
             print(type(e), e)
@@ -144,7 +148,7 @@ def chat_completion_openai(model, messages, temperature, max_tokens, api_dict=No
         except Exception as e:
             print(type(e), repr(e))
     
-    return output
+    return output, prompt_tokens, completion_tokens
 
 
 def chat_completion_openai_azure(model, messages, temperature, max_tokens, api_dict=None):
@@ -361,8 +365,7 @@ def chat_completion_yandex(model, messages, temperature, max_tokens, api_dict=No
     # Set up the headers
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {IAM_TOKEN}",
-        "x-folder-id": FOLDER_ID
+        "Authorization": f"Api-Key {IAM_TOKEN}",
     }
 
     output: str = API_ERROR_OUTPUT
